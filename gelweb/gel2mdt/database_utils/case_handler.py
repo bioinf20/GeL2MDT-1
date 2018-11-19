@@ -300,20 +300,21 @@ class Case(object):
             self.ig_objs.append(ig_obj)
         for clinical_report in self.json['clinical_report']:
             cr_obj = ClinicalReport.fromJsonDict(clinical_report['clinical_report_data'])
-            for variant in cr_obj.variants:
-                variant_min_tier = None
-                for report_event in variant.reportEvents:
-                    if self.json['sample_type'] == 'raredisease':
-                        if report_event.tier:
-                            tier = int(report_event.tier[-1])
-                    elif self.json['sample_type'] == 'cancer':
-                        if report_event.domain:
-                            tier = int(report_event.domain[-1])
-                    if variant_min_tier is None:
-                        variant_min_tier = tier
-                    elif tier < variant_min_tier:
-                        variant_min_tier = tier
-                variant.max_tier = variant_min_tier
+            if cr_obj.variants:
+                for variant in cr_obj.variants:
+                    variant_min_tier = None
+                    for report_event in variant.reportEvents:
+                        if self.json['sample_type'] == 'raredisease':
+                            if report_event.tier:
+                                tier = int(report_event.tier[-1])
+                        elif self.json['sample_type'] == 'cancer':
+                            if report_event.domain:
+                                tier = int(report_event.domain[-1])
+                        if variant_min_tier is None:
+                            variant_min_tier = tier
+                        elif tier < variant_min_tier:
+                            variant_min_tier = tier
+                    variant.max_tier = variant_min_tier
 
                 variant_object_count += 1
                 case_variant = CaseVariant(
@@ -593,15 +594,16 @@ class CaseAttributeManager(object):
 
             for clinical_report in self.case.json['clinical_report']:
                 cr_obj = ClinicalReport.fromJsonDict(clinical_report['clinical_report_data'])
-                for variant in cr_obj.variants:
-                    variant.maternal_zygosity = 'unknown'
-                    variant.paternal_zygosity = 'unknown'
-                    for call in variant.variantCalls:
-                        if call.participantId == self.case.mother["gel_id"]:
-                            variant.maternal_zygosity = call.zygosity
-                        elif call.participantId == self.case.father["gel_id"]:
-                            variant.paternal_zygosity = call.zygosity
-                    variants_to_check.append(variant)
+                if cr_obj.variants:
+                    for variant in cr_obj.variants:
+                        variant.maternal_zygosity = 'unknown'
+                        variant.paternal_zygosity = 'unknown'
+                        for call in variant.variantCalls:
+                            if call.participantId == self.case.mother["gel_id"]:
+                                variant.maternal_zygosity = call.zygosity
+                            elif call.participantId == self.case.father["gel_id"]:
+                                variant.paternal_zygosity = call.zygosity
+                        variants_to_check.append(variant)
 
             for variant in variants_to_check:
                 inheritance = self.determine_variant_inheritance(variant)
@@ -834,7 +836,6 @@ class CaseAttributeManager(object):
         for transcript in case_transcripts:
             # convert canonical to bools:
             transcript.canonical = transcript.transcript_canonical == "YES"
-            transcript.selected = transcript.transcript_canonical == "YES"
             if not transcript.gene_hgnc_id:
                 # if the transcript has no recognised gene associated
                 continue  # don't bother checking genes
@@ -842,6 +843,14 @@ class CaseAttributeManager(object):
             for gene in genes:
                 if gene.entry.hgnc_id == transcript.gene_hgnc_id:
                     transcript.gene_model = gene.entry
+                    preferred_transcript = PreferredTranscript.objects.filter(gene=gene.entry,
+                                                                              genome_assembly=genome_assembly)
+                    if preferred_transcript:
+                        preferred_transcript = preferred_transcript.first()
+                        if preferred_transcript.transcript.name == transcript.transcript_name:
+                            transcript.selected = True
+                    else:
+                        transcript.selected = transcript.transcript_canonical == "YES"
 
         transcripts = ManyCaseModel(Transcript, [{
             "gene": transcript.gene_model,
@@ -1003,20 +1012,21 @@ class CaseAttributeManager(object):
                     variants_list.append(tiered_variant)
 
         for clinical_report in self.case.clinical_report_objs:
-            for variant in clinical_report.variants:
-                variant.dbsnp = None
-                if variant.variantAttributes.variantIdentifiers.dbSnpId:
-                    if re.match('rs\d+', variant.variantAttributes.variantIdentifiers.dbSnpId):
-                        variant.dbsnp = variant.variantAttributes.variantIdentifiers.dbSnpId
-                cip_variant = {
-                    "genome_assembly": genome_assembly,
-                    "alternate": variant.case_variant.alt,
-                    "chromosome": variant.case_variant.chromosome,
-                    "db_snp_id": variant.dbsnp,
-                    "reference": variant.case_variant.ref,
-                    "position": variant.case_variant.position,
-                }
-                variants_list.append(cip_variant)
+            if clinical_report.variants:
+                for variant in clinical_report.variants:
+                    variant.dbsnp = None
+                    if variant.variantAttributes.variantIdentifiers.dbSnpId:
+                        if re.match('rs\d+', variant.variantAttributes.variantIdentifiers.dbSnpId):
+                            variant.dbsnp = variant.variantAttributes.variantIdentifiers.dbSnpId
+                    cip_variant = {
+                        "genome_assembly": genome_assembly,
+                        "alternate": variant.case_variant.alt,
+                        "chromosome": variant.case_variant.chromosome,
+                        "db_snp_id": variant.dbsnp,
+                        "reference": variant.case_variant.ref,
+                        "position": variant.case_variant.position,
+                    }
+                    variants_list.append(cip_variant)
 
         for variant in variants_list:
             self.case.variant_manager.add_variant(variant)
@@ -1135,8 +1145,9 @@ class CaseAttributeManager(object):
                 if ig_variant.case_variant:
                     raw_proband_variants.append(ig_variant)
         for clinical_report in self.case.clinical_report_objs:
-            for variant in clinical_report.variants:
-                raw_proband_variants.append(variant)
+            if clinical_report.variants:
+                for variant in clinical_report.variants:
+                    raw_proband_variants.append(variant)
 
         for ig_variant in raw_proband_variants:
             # some json_variants won't have an entry (T3), so:
@@ -1257,13 +1268,14 @@ class CaseAttributeManager(object):
                             break
 
         for clinical_report in self.case.clinical_report_objs:
-            for variant in clinical_report.variants:
-                for proband_variant in proband_variants:
-                    if proband_variant.variant == variant.variant_entry:
-                        variant.proband_variant = proband_variant
-                        variant.company = 'Clinical Report'
-                        pv_flags.append(variant)
-                        break
+            if clinical_report.variants:
+                for variant in clinical_report.variants:
+                    for proband_variant in proband_variants:
+                        if proband_variant.variant == variant.variant_entry:
+                            variant.proband_variant = proband_variant
+                            variant.company = 'Clinical Report'
+                            pv_flags.append(variant)
+                            break
 
         pv_flags = ManyCaseModel(PVFlag, [{
             "proband_variant": variant.proband_variant,

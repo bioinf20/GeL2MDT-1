@@ -514,14 +514,31 @@ class Transcript(models.Model):
     strand = models.CharField(max_length=255)
     protein = models.CharField(max_length=255, null=True)
     location = models.CharField(max_length=255, null=True)
-
     gene = models.ForeignKey(Gene, on_delete=models.CASCADE, null=True)
     genome_assembly = models.ForeignKey(ToolOrAssemblyVersion, on_delete=models.CASCADE)
+
+    def is_preferred_transcript(self):
+        preferred_transcripts = PreferredTranscript.objects.filter(gene=self.gene,
+                                                                   genome_assembly=self.genome_assembly,
+                                                                   transcript=self)
+        return preferred_transcripts
 
     class Meta:
         managed = True
         db_table = 'Transcript'
         unique_together = (('name', 'genome_assembly'),)
+        app_label= 'gel2mdt'
+
+
+class PreferredTranscript(models.Model):
+    transcript = models.ForeignKey(Transcript, on_delete=models.CASCADE)
+    gene = models.ForeignKey(Gene, on_delete=models.CASCADE)
+    genome_assembly = models.ForeignKey(ToolOrAssemblyVersion, on_delete=models.CASCADE)
+
+    class Meta:
+        managed = True
+        db_table = 'PreferredTranscript'
+        unique_together = (('gene', 'genome_assembly'),)
         app_label= 'gel2mdt'
 
 
@@ -542,7 +559,6 @@ class TranscriptVariant(models.Model):
         managed = True
         db_table = 'TranscriptVariant'
         app_label= 'gel2mdt'
-
 
 class Zygosities(ChoiceEnum):
     """
